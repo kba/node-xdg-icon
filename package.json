@@ -1,0 +1,33 @@
+{
+  "name": "xdg-icon",
+  "version": "0.0.1",
+  "description": "XDG Icon Theme implementation",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepublish": "make"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kba/node-xdg-icon.git"
+  },
+  "keywords": [
+    "xdg"
+  ],
+  "author": "kba",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/kba/node-xdg-icon/issues"
+  },
+  "homepage": "https://github.com/kba/node-xdg-icon#readme",
+  "devDependencies": {
+    "coffee-script": "^1.10.0"
+  },
+  "dependencies": {
+    "async": "^1.5.0",
+    "infolis-logging": "0.0.4",
+    "nedb": "^1.5.0",
+    "tv4": "^1.2.7",
+    "xdg-basedir": "^2.0.0"
+  }
+}
