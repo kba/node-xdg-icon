@@ -56,7 +56,7 @@ module.exports = class ThemeCache extends EventEmitter
 								cached._cache[file] = fullPath
 							doneFile()
 					, =>
-						log.debug "Cached #{Object.keys(cached._cache).length} files in #{basedir}"
+						log.silly "Cached #{Object.keys(cached._cache).length} files in #{basedir}"
 						cb()
 
 	_refreshFallbackIcons: (cb) ->
@@ -103,13 +103,13 @@ module.exports = class ThemeCache extends EventEmitter
 		if @fullRebuildLock
 			return @emit 'error', "Cache is unavailable due to reindexing since #{@fullRebuildLock}"
 		@fullRebuildLock = new Date()
-		@clearThemes()
-		@clearFallbackIcons()
+		@clearThemeCache()
+		@clearFallbackCache()
 		@_findInstalledThemes (themes) =>
 			Async.each themes, (themeName, done) =>
 				log.silly "Loading #{themeName}"
 				@getTheme themeName, (err) =>
-					log.warn(err) if err
+					# log.warn(err) if err
 					done()
 			, (err) =>
 				log.error err if err
@@ -138,7 +138,7 @@ module.exports = class ThemeCache extends EventEmitter
 		cb null
 
 	getTheme: (themeName, cb) ->
-		log.debug "GET-THEME #{themeName}"
+		log.silly "GET-THEME #{themeName}"
 		if themeName of @themeCache
 			log.silly "#{themeName} is in themeCache"
 			now = new Date()
@@ -146,7 +146,7 @@ module.exports = class ThemeCache extends EventEmitter
 			if now - cached.lastChecked <= @config.cacheTime
 				log.silly "Must not check yet"
 				return cb null, cached
-			log.debug "Must check mtime for theme #{themeName} (#{now - cached.lastChecked}ms ago"
+			log.debug "Must check mtime for theme #{themeName} (#{now - cached.lastChecked}ms > #{@config.cacheTime})"
 			Async.forEachOf cached.baseDirs, (mtime, dir, done) =>
 				Fs.stat dir, (err, stat) =>
 					if err or stat.mtime >= cached.mtime
@@ -160,7 +160,7 @@ module.exports = class ThemeCache extends EventEmitter
 				return @removeTheme themeName, =>
 					return @getTheme themeName, cb
 		else
-			log.debug "#{themeName} is NOT cached"
+			log.silly "#{themeName} is NOT cached"
 			@_getIndexTheme themeName, (err, indexTheme) =>
 				return cb err if err
 				theme = @themeCache[themeName] = {
@@ -189,7 +189,7 @@ module.exports = class ThemeCache extends EventEmitter
 						cb null, theme
 
 	getFallbackIcon: (file, cb) =>
-		log.debug "GET-ICON #{file}"
+		log.silly "GET-ICON #{file}"
 		@_refreshFallbackIcons =>
 			Async.detect @config.iconDirs, (basedir, found) =>
 				found @fallbackCache[basedir]._cache[file]

@@ -106,7 +106,7 @@ module.exports = class IconManager extends EventEmitter
 			return cb "failed#_lookupFallbackIcon #{icon}"
 
 	_lookupIcon : (iconname, size, theme, cb) ->
-		log.debug "enter#_lookupIcon #{iconname} #{size} #{theme.id}"
+		log.silly "enter#_lookupIcon #{iconname} #{size} #{theme.id}"
 		for subdir in theme.Directories
 			if @_directoryMatchesSize(subdir, size)
 				for extension in @config.extensions
