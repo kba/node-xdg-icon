@@ -26,6 +26,7 @@
   "dependencies": {
     "async": "^1.5.0",
     "infolis-logging": "0.0.4",
+    "jsonpointer": "^3.0.0",
     "nedb": "^1.5.0",
     "tv4": "^1.2.7",
     "xdg-basedir": "^2.0.0"

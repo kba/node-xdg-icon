@@ -1,6 +1,12 @@
 XdgBasedir = require 'xdg-basedir'
 Path = require 'path'
 
+ICON_DEFAULT_DIRECTORY_THRESHOLD = 2
+ICON_DEFAULT_DIRECTORY_TYPE = 'Threshold'
+ICON_THEME_SECTION = 'Icon Theme'
+ICON_DEFAULT_CACHE_TIME = 5000
+ICON_EXTENSIONS = ['png', 'svg', 'xpm']
+
 # http://standards.freedesktop.org/icon-theme-spec/icon-theme-spec-latest.html#directory_layout
 ICON_THEME_DIRS = {}
 for xdgDataDir in XdgBasedir.dataDirs
@@ -14,10 +20,14 @@ ICON_DIRS["/usr/share/pixmaps"] = 1
 ICON_DIRS = Object.keys ICON_DIRS
 
 # http://standards.freedesktop.org/icon-theme-spec/icon-theme-spec-latest.html#ftn.idm140276330134880 
-FALLBACK_ICON_THEME = 'hicolor'
+ICON_FALLBACK_THEME = 'hicolor'
 
 module.exports = {
+	ICON_THEME_SECTION
 	ICON_DIRS
 	ICON_THEME_DIRS
-	FALLBACK_ICON_THEME
+	ICON_FALLBACK_THEME
+	ICON_DEFAULT_DIRECTORY_THRESHOLD
+	ICON_DEFAULT_DIRECTORY_TYPE
+	ICON_EXTENSIONS
 }

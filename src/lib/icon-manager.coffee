@@ -1,100 +1,154 @@
-{ICON_THEME_DIRS, ICON_DIRS, FALLBACK_ICON_THEME} = require './dirs'
-
 Async        = require 'async'
 Fs           = require 'fs'
 Path         = require 'path'
-ThemeCache   = require './theme-cache'
 EventEmitter = require('events').EventEmitter
 
-log = require('./log')(module)
+log        = require('./log')(module)
+IconCache  = require './icon-cache'
+IconConfig = require './icon-config'
 
-class IconManager extends EventEmitter
+module.exports = class IconManager extends EventEmitter
 
-	constructor: ->
-		@cache = new ThemeCache()
-		@cache.on 'error', (err) => @emit 'error', err
-		@cache.on 'loaded', => @emit 'loaded'
-	
+	constructor: (config={}) ->
+		@config = new IconConfig(config)
+		@cache = new IconCache(@config)
+		@cache.on 'error', (err) =>
+			log.error err
+			@emit 'error', err
+		@cache.once 'rebuilt', =>
+			@initialized = true
+			@emit 'loaded'
+
 	init : ->
-		@cache.init()
+		@cache.rebuild()
 
-	listInstalledThemes : () ->
-		return @cache.keys()
+	listThemes : (cb) ->
+		if @cache.fullRebuildLock
+			return cb "Cache is unavailable due to reindexing since #{@cache.fullRebuildLock}"
+		return cb null, Object.keys @cache.themeCache
+
+	getTheme : (themeName, cb) ->
+		if @cache.fullRebuildLock
+			return cb "Cache is unavailable due to reindexing since #{@cache.fullRebuildLock}"
+		return @cache.getTheme themeName, cb
 
 	findIcon : (icon, size, themeName, cb) ->
-		[themeName, cb] = [FALLBACK_ICON_THEME, themeName] unless cb
-		@cache.get themeName, (err, themeName) =>
+		if @cache.fullRebuildLock
+			return cb "Cache is unavailable due to reindexing since #{@cache.fullRebuildLock}"
+		[themeName, cb] = [@config.fallbackTheme, themeName] unless cb
+		@cache.getTheme themeName, (err, theme) =>
 			return cb err if err
-			@findIconHelper icon, size, themeName, (err, filename) =>
-				log.error err if err
+			@_findIconHelper icon, size, theme, (err, filename) =>
 				return cb null, filename if filename
-				@cache.get FALLBACK_ICON_THEME, (err, fallbackTheme) =>
-					@findIconHelper icon, size, fallbackTheme, (err, filename) =>
-						log.error err if err
+				log.silly "Failed to find in theme or inherited. Trying fallback theme"
+				@cache.getTheme @config.fallbackTheme, (err, fallbackTheme) =>
+					@_findIconHelper icon, size, fallbackTheme, (err, filename) =>
 						return cb null, filename if filename
-						@cache.getFallbackIcon icon, cb
+						@_lookupFallbackIcon icon, cb
 
-	findIconHelper: (icon, size, theme, cb) ->
-		log.debug "enter#findIconHelper #{icon}, #{size}, #{theme.id}"
-		@lookupIcon icon, size, theme, (err, filename) =>
-			log.error err if err
+	_findIconHelper: (icon, size, theme, cb) ->
+		log.silly "enter#_findIconHelper #{icon} #{size} #{theme.id}"
+		@_lookupIcon icon, size, theme, (err, filename) =>
 			return cb null, filename if filename
-			Async.detect theme.inherits, (parentName, found) =>
-				@cache.get parentName, (err, parent) =>
-					@findIconHelper icon, size, parent, (err, filename) =>
-						return found true if filename
-						found()
+			Async.each theme.Inherits, (parentName, found) =>
+				@cache.getTheme parentName, (err, parent) =>
+					@_findIconHelper icon, size, parent, (err, filename) =>
+						return found filename if filename
+						return found false
 			, (filename) =>
 				return cb null, filename if filename
-				return cb "Finally found nothing :("
+				return cb "failed#_findIconHelper #{icon} #{size} #{theme.id}"
 
-	lookupIcon : (iconname, size, theme, cb) ->
-		log.debug "enter#lookupIcon #{iconname}, #{size}, #{theme.id}"
-		for subdir in theme.directories
-			if @directoryMatchesSize(subdir, size)
-				for extension in ["png", "svg", "xpm"]
+
+	findBestIcon: (iconList, size, themeName, cb) ->
+		log.debug "enter#findBestIcon #{iconList} #{size} #{themeName}"
+		[themeName, cb] = [@config.fallbackTheme, themeName] unless cb
+		@cache.getTheme themeName, (err, theme) =>
+			@_findBestIconHelper iconList, size, theme, (err, filename) =>
+				return cb null, filename if filename
+				@cache.getTheme @config.fallbackTheme, (err, fallbackTheme) =>
+					@_findBestIconHelper iconList, size, fallbackTheme, (err, filename) =>
+						return cb null, filename if filename
+						Async.eachSeries iconList, (icon, done) =>
+							@_lookupFallbackIcon icon, (err, filename) =>
+								return done filename if filename
+								return done()
+						, (filename) =>
+							return cb filename if filename
+							return cb 'None of the icons found'
+
+	_findBestIconHelper: (iconList, size, theme, cb) ->
+		log.debug "enter#_findBestIconHelper #{iconList} #{size} #{theme.id}"
+		Async.eachSeries iconList, (icon, doneIconList) =>
+			@_lookupIcon icon, size, theme, (err, filename) =>
+				return doneIconList filename if filename
+				Async.each theme.Inherits, (parentName, doneParent) =>
+					@cache.getTheme parentName, (err, parent) =>
+						log.debug "ERRRR ", err
+						@_findBestIconHelper iconList, size, parent, (err, filename) =>
+							return doneParent filename if filename
+							return doneParent false
+				, (filename) =>
+					return doneIconList filename if filename
+					return doneIconList null, "failed#_findBestIconHelper #{icon} #{size} #{theme.id}"
+		, (filename, err) =>
+			return cb null, filename if filename
+			return cb err
+
+	_lookupFallbackIcon: (icon, cb) ->
+		log.silly "enter#_lookupFallbackIcon #{icon}"
+		Async.each @config.extensions, (extension, found) =>
+			@cache.getFallbackIcon "#{icon}.#{extension}", (err, filename) ->
+				return found filename if filename
+				return found false
+		, (filename) ->
+			return cb null, filename if filename
+			return cb "failed#_lookupFallbackIcon #{icon}"
+
+	_lookupIcon : (iconname, size, theme, cb) ->
+		log.debug "enter#_lookupIcon #{iconname} #{size} #{theme.id}"
+		for subdir in theme.Directories
+			if @_directoryMatchesSize(subdir, size)
+				for extension in @config.extensions
 					filename = "#{iconname}.#{extension}"
-					if subdir.files[filename]
-						return cb null, subdir.files[filename]
-		log.debug 'lookupIcon: No exact match.'
+					if subdir._cache[filename]
+						log.silly "Found exact match hit in #{theme.id}/#{subdir.id}"
+						return cb null, subdir._cache[filename]
+		log.silly "No size match for #{iconname} #{size} #{theme.id}"
 		minimal_size = Number.MAX_VALUE
 		closest_filename = null
-		for subdir in theme.directories
-			for extension in ["png", "svg", "xpm"]
+		for subdir in theme.Directories
+			for extension in @config.extensions
 				filename = "#{iconname}.#{extension}"
-				subdirDistance = @directorySizeDistance(subdir, size)
-				# log.debug subdir.files
-				# log.debug theme.id, subdir.id
-				if subdir.files[filename] and subdirDistance < minimal_size
-					closest_filename = subdir.files[filename]
+				subdirDistance = @_directorySizeDistance(subdir, size)
+				if subdir._cache[filename] and subdirDistance < minimal_size
+					closest_filename = subdir._cache[filename]
 					minimal_size = subdirDistance
 		if closest_filename
-			log.debug "Minimal size: #{minimal_size}: #{closest_filename}"
+			log.silly "Found with size difference #{minimal_size}: #{closest_filename}"
 			return cb null, closest_filename
-		return cb "nothing found in lookupIcon"
+		return cb "failed#_lookupIcon #{iconname} #{size} #{theme.id}"
 
-	directoryMatchesSize: (subdir, iconsize) ->
-		if subdir.type is 'Fixed'
-			return subdir.size == iconsize
-		if subdir.type is 'Scalable'
-			return subdir.minSize <= iconsize <= subdir.maxSize
-		if subdir.type is 'Threshold'
-			return subdir.type - subdir.threshold <= iconsize <= subdir.size + subdir.threshold
+	_directoryMatchesSize: (subdir, iconsize) ->
+		if subdir.Type is 'Fixed'
+			return subdir.Size == iconsize
+		if subdir.Type is 'Scalable'
+			return subdir.MinSize <= iconsize <= subdir.MaxSize
+		if subdir.Type is 'Threshold'
+			return subdir.Type - subdir.Threshold <= iconsize <= subdir.Size + subdir.Threshold
 
-	directorySizeDistance: (subdir, iconsize) ->
-		if subdir.type is 'Fixed'
-			return Math.abs(subdir.size - iconsize)
-		if subdir.type is 'Scalable'
-			if iconsize < subdir.minSize
-				return subdir.minSize - iconsize
-			if iconsize > subdir.maxSize
-				return iconsize - subdir.maxSize
+	_directorySizeDistance: (subdir, iconsize) ->
+		if subdir.Type is 'Fixed'
+			return Math.abs(subdir.Size - iconsize)
+		if subdir.Type is 'Scalable'
+			if iconsize < subdir.MinSize
+				return subdir.MinSize - iconsize
+			if iconsize > subdir.MaxSize
+				return iconsize - subdir.MaxSize
 			return 0
-		if subdir.type is 'Threshold'
-			if iconsize < subdir.size - subdir.threshold
-				return subdir.minSize - iconsize
-			if iconsize > subdir.size + subdir.threshold
-				return iconsize - subdir.maxSize
+		if subdir.Type is 'Threshold'
+			if iconsize < subdir.Size - subdir.Threshold
+				return subdir.MinSize - iconsize
+			if iconsize > subdir.Size + subdir.Threshold
+				return iconsize - subdir.MaxSize
 			return 0
-
-module.exports = new IconManager()
